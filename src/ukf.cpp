@@ -25,10 +25,10 @@ UKF::UKF() {
   P_ = MatrixXd(5, 5);
 
   // Process noise standard deviation longitudinal acceleration in m/s^2
-  std_a_ = 1.0;
+  std_a_ = 0.75;
 
   // Process noise standard deviation yaw acceleration in rad/s^2
-  std_yawdd_ = 3.14;
+  std_yawdd_ = 0.75;
 
   //State dimension variable init
   n_x_=5;
@@ -69,13 +69,28 @@ UKF::UKF() {
    */
   lambda_=3-n_x_;
 
-  P_<<std_laspx_*std_laspx_,0,0,0,0,
-     0,std_laspy_*std_laspy_,0,0,0,
-     0,0,std_radr_*std_radr_,0,0,
-     0,0,0,std_radphi_*std_radphi_,0,
-     0,0,0,0,std_radrd_*std_radrd_;
+  P_<<1,0,0,0,0,
+      0,1,0,0,0,
+      0,0,1,0,0,
+      0,0,0,1,0,
+      0,0,0,0,1;
+  
+  R_radar_ = MatrixXd(3, 3);
+  R_radar_ << std_radr_*std_radr_, 0, 0,
+              0, std_radphi_*std_radphi_, 0,
+              0, 0,std_radrd_*std_radrd_;
+
+  R_lidar_ = MatrixXd(2, 2);
+  R_lidar_ << std_laspx_*std_laspx_,0,
+              0,std_laspy_*std_laspy_;
 
   weights_=VectorXd(2*n_aug_+1);
+      // set weights
+  weights_(0) = lambda_/(lambda_+n_aug_);
+  for (int i=1; i<2*n_aug_+1; ++i) {  // 2n+1 weights
+    double weight = 0.5/(n_aug_+lambda_);
+    weights_(i) = weight;
+  }
  
 }
 
@@ -86,7 +101,29 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
    * TODO: Complete this function! Make sure you switch between lidar and radar
    * measurements.
    */
-  double delta_t=meas_package.timestamp_-time_us_;
+    if ( !is_initialized_) {
+    if (meas_package.sensor_type_ == MeasurementPackage::SensorType::RADAR) {
+      double rho = meas_package.raw_measurements_[0]; // range
+      double phi = meas_package.raw_measurements_[1]; // bearing
+      double rho_dot = meas_package.raw_measurements_[2]; // velocity of rh
+      double x = rho * cos(phi);
+      double y = rho * sin(phi);
+      double vx = rho_dot * cos(phi);
+  	  double vy = rho_dot * sin(phi);
+      double v = sqrt(vx * vx + vy * vy);
+      x_ << x, y, v, 0, 0;
+    } else {
+      x_ << meas_package.raw_measurements_[0], meas_package.raw_measurements_[1], 0, 0, 0;
+    }
+
+    // Saving first timestamp in seconds
+    time_us_ = meas_package.timestamp_ ;
+    // done initializing, no need to predict or update
+    is_initialized_ = true;
+    return;
+  }
+
+  double delta_t=(meas_package.timestamp_-time_us_) / 1000000.0;
   time_us_=meas_package.timestamp_;
   Prediction(delta_t);
   
@@ -113,7 +150,8 @@ void UKF::Prediction(double delta_t) {
 
   //Augmented covariance matrix
   Eigen::MatrixXd P_aug_ = MatrixXd(7,7);
-
+  
+  P_aug_.fill(0.0);
   P_aug_.topLeftCorner(5,5) = P_;
   P_aug_(5,5) = std_a_*std_a_;
   P_aug_(6,6) = std_yawdd_*std_yawdd_;
@@ -175,12 +213,7 @@ void UKF::Prediction(double delta_t) {
     Xsig_pred_(4,i) = yawd_p;
   }
 
-    // set weights
-  weights_(0) = lambda_/(lambda_+n_aug_);
-  for (int i=1; i<2*n_aug_+1; ++i) {  // 2n+1 weights
-    double weight = 0.5/(n_aug_+lambda_);
-    weights_(i) = weight;
-  }
+
 
   // predicted state mean
  // x_.fill(0.0);
@@ -189,7 +222,7 @@ void UKF::Prediction(double delta_t) {
   }
 
   // predicted state covariance matrix
- //P_.fill(0.0);
+ P_.fill(0.0);
   for (int i = 0; i < 2 * n_aug_ + 1; ++i) {  // iterate over sigma points
     // state difference
     VectorXd x_diff = Xsig_pred_.col(i) - x_;
@@ -260,7 +293,7 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
   MatrixXd R = MatrixXd(n_z,n_z);
   R <<  std_laspx_*std_laspx_, 0,
         0, std_laspy_*std_laspy_;
-  S = S + R;
+  S = S + R_lidar_;
 
   MatrixXd Tc = MatrixXd(n_x_, n_z);
    // calculate cross correlation matrix
@@ -355,7 +388,7 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
   R <<  std_radr_*std_radr_, 0, 0,
         0, std_radphi_*std_radphi_, 0,
         0, 0,std_radrd_*std_radrd_;
-  S = S + R;
+  S = S + R_radar_;
 
   MatrixXd Tc = MatrixXd(n_x_, n_z);
    // calculate cross correlation matrix
