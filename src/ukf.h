@@ -60,7 +60,7 @@ class UKF {
   Eigen::MatrixXd P_;
 
   // predicted sigma points matrix
-  Eigen::MatrixXd Xsig_pred_;
+ Eigen::MatrixXd Xsig_pred_;
 
   // time when the state is true, in us
   long long time_us_;
@@ -94,6 +94,7 @@ class UKF {
 
   // Augmented state dimension
   int n_aug_;
+  int n_sig_;
 
   // Sigma point spreading parameter
   double lambda_;
